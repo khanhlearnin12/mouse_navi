@@ -49,8 +49,8 @@ int main(){
 	
 	//2.ENABLE MOVEMENT
 	ioctl(fd, UI_SET_EVBIT, EV_REL);
-    ioctl(fd, UI_SET_RELBIT, REL_X);
-    ioctl(fd, UI_SET_RELBIT, REL_Y);
+	ioctl(fd, UI_SET_RELBIT, REL_X);
+	ioctl(fd, UI_SET_RELBIT, REL_Y);
 
 	memset(&usetup, 0, sizeof(usetup));
 	usetup.id.bustype = BUS_USB;
@@ -80,10 +80,10 @@ int main(){
 	close(fd);
 
 	return 0;
-   int Height = 800;
-   int Width = 900;
-   mouseMove(Width,Height);
- 	cout<< " Hello World! ,my navigation with cpp "<<endl;
+	int Height = 800;
+   	int Width = 900;
+	mouseMove(Width,Height);
+	cout<< " Hello World! ,my navigation with cpp "<<endl;
 	
 }
 
@@ -102,19 +102,33 @@ void emit(int fd, int type, int code, int val){
 
 
 void mouseMove(int fd){
-  float angle = 0.0f;
-  float radios = 5.0f;
-  int Height = 0;
-  int Width = 0;
+	  float angle = 0.0f;
+	  float radios = 5.0f;
+	  int Height = 0;
+	  int Width = 0;
 
-  //calcualate the difference
-  int prevY = 0;
-  int prevX = 0;
+	  //calcualate the difference
+	  int prevY = 0;
+	  int prevX = 0;
 
-  cout << "Starting spiral ......"<<endl;
-  
-  for (int  i = 0; i < 100; i++) {
-    
-  }
+	  cout << "Starting spiral ......"<<endl;
+	  
+	  for (int  i = 0; i < 100; i++) {
+		angle += 0.2f;
+		radius += 0.2f;
 
+		int targetx = (int)(radius * cos(angle));
+		int targety = (int)(radius* sin(angle));
+
+		//calcualate DELTA (how to move from last spot)
+		int moveX = targetX - prevX;
+		int moveY = targetY - prevY;
+	 	
+		//send "Relative move"
+		emit(fd, EV_REL, REL_X, moveX);
+		emit(fd, EV_REL, REL_y, moveY);
+		emit(fd, EV_REL, SYN_REPORT,0);
+
+	        //	
+	  }
 } 
