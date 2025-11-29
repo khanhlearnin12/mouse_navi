@@ -1,134 +1,200 @@
-//cpp library 
+ //how to compile 
+//g++ mouse_navigation.cpp -o my_mouse $(pkg-config --cflags --libs atspi-2 glib-2.0)
+
 #include <iostream>
 #include <unistd.h>
 #include <stdlib.h>
 #include <cmath>
+#include <vector>
+#include <string>
 
+// C headers must be wrapped in extern "C"
 extern "C"{
-	//c library in this part
-	#include <linux/uinput.h>
-	#include <at-spi-2.0/atspi/atspi.h>
-	#include <fcntl.h>
-	#include <unistd.h>
-	#include <string.h>
+    #include <linux/uinput.h>
+    #include <atspi/atspi.h> // Standard path for atspi
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <string.h>
+    #include <glib.h>
 }
 
 using namespace std;
 
+// Create struct to store our value
+struct Target {
+    string name;
+    int x, y;
+};
 
-//detect clickable ellement
-void det_d();
-//assign them sort, key hint  
-void assign_them();
-//capture keyboard input map it those ellement
-void capture_key();
-//simulate mouse click and focus change automatically
-void stim_mouse_click();
-//mouse navigation 
+// --- Function Prototypes ---
+// (Fixed: Added types to arguments)
+void find_clickable(AtspiAccessible* node, vector<Target>& results);
+void det_d(); 
 void mouseMove(int fd);
-//k
-void emit(int fd ,int type ,int code ,int val );
+void emit(int fd, int type, int code, int val);
 
 int main(){
-	
-	struct uinput_setup usetup;
-								//write only //non blocking 
-   	int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK); 
-	if(fd < 0) {
-        cout << "Error opening /dev/uinput. Try 'sudo'?" << endl;
+    // 1. Setup Virtual Mouse (UInput)
+    struct uinput_setup usetup;
+    
+    // Open in non-blocking mode
+    int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK); 
+    if(fd < 0) {
+        cout << "Error opening /dev/uinput. Try running with 'sudo'?" << endl;
         return -1;
     }
 
-   /*
-    * The ioctls below will enable the device that is about to be
-    * created, to pass key events, in this case the space key.
-    */
-	//ENABLE BOTTON 
-   	ioctl(fd, UI_SET_EVBIT, EV_KEY);
+    // Enable Button
+    ioctl(fd, UI_SET_EVBIT, EV_KEY);
     ioctl(fd, UI_SET_KEYBIT, BTN_LEFT);
-	
-	//2.ENABLE MOVEMENT
-	ioctl(fd, UI_SET_EVBIT, EV_REL);
-	ioctl(fd, UI_SET_RELBIT, REL_X);
-	ioctl(fd, UI_SET_RELBIT, REL_Y);
 
-	memset(&usetup, 0, sizeof(usetup));
-	usetup.id.bustype = BUS_USB;
-	usetup.id.vendor = 0x1234; /* sample vendor */
-	strcpy(usetup.name, "Cpp virtual mouse");
+    // Enable Movement
+    ioctl(fd, UI_SET_EVBIT, EV_REL);
+    ioctl(fd, UI_SET_RELBIT, REL_X);
+    ioctl(fd, UI_SET_RELBIT, REL_Y);
 
-	ioctl(fd, UI_DEV_SETUP, &usetup);
-	ioctl(fd, UI_DEV_CREATE);
+    memset(&usetup, 0, sizeof(usetup));
+    usetup.id.bustype = BUS_USB;
+    usetup.id.vendor = 0x1234; 
+    strcpy(usetup.name, "Cpp virtual mouse");
 
-	/*
-		* On UI_DEV_CREATE the kernel will create the device node for this
-		* device. We are inserting a pause here so that userspace has time
-		* to detect, initialize the new device, and can start listening to
-		* the event, otherwise it will not notice the event we are about
-		* to send. This pause is only needed in our example code!
-		*/
-	sleep(1);
+    ioctl(fd, UI_DEV_SETUP, &usetup);
+    ioctl(fd, UI_DEV_CREATE);
 
+    // Wait for system to register device
+    sleep(1);
 
-	/*
-		* Give userspace some time to read the events before we destroy the
-		* device with UI_DEV_DESTOY.
-		*/
-	mouseMove(fd);
+    // 2. Scan the screen for buttons (Added this call)
+    det_d();
 
-	ioctl(fd, UI_DEV_DESTROY);
-	close(fd);
+    // 3. Move the mouse in a spiral
+    mouseMove(fd);
 
-	return 0;
-	int Height = 800;
-   	int Width = 900;
-	mouseMove(Width,Height);
-	cout<< " Hello World! ,my navigation with cpp "<<endl;
-	
+    // 4. Cleanup
+    ioctl(fd, UI_DEV_DESTROY);
+    close(fd);
+
+    return 0;
 }
 
+void det_d(){
+    // Initialize ATSPI
+    if (atspi_init() != 0) {
+        cout << "Failed to initialize ATSPI" << endl;
+        return;
+    }
+ 
+    // Get the desktop
+    AtspiAccessible* desktop = atspi_get_desktop(0);    
+    vector<Target> buttons;
+  
+    cout << "Screen scanning... (this might take a second)" << endl;
+
+    find_clickable(desktop, buttons);
+  
+    cout << "Found " << buttons.size() << " clickable items!" << endl;
+  
+    // Print first 5 items found
+    for (int i = 0; i < buttons.size() && i < 5; i++) {
+         cout << "Name: " << buttons[i].name  
+              << " | X: " << buttons[i].x << " Y: " << buttons[i].y << endl; 
+    }
+}
+
+void find_clickable(AtspiAccessible* node, vector<Target>& results) {
+    GError* err = NULL;
+  
+    // check validity
+    if (!node) return;
+
+    // get attribute
+    AtspiRole role = atspi_accessible_get_role(node, &err); 
+    AtspiStateSet* states = atspi_accessible_get_state_set(node); 
+
+    // Filter: is this node clickable?
+    bool is_clickable = (role == ATSPI_ROLE_PUSH_BUTTON || role == ATSPI_ROLE_LINK);
+    
+    // Check if visible
+    bool is_visible = atspi_state_set_contains(states, ATSPI_STATE_VISIBLE) 
+                   && atspi_state_set_contains(states, ATSPI_STATE_SHOWING);
+
+    // IF MATCH: Get Coordinates and Save
+    if (is_clickable && is_visible) {
+        // Get the Component interface to read X/Y positions
+        AtspiComponent* comp = atspi_accessible_get_component_iface(node);
+        if (comp) {
+            AtspiRect* rect = atspi_component_get_extents(comp, ATSPI_COORD_TYPE_SCREEN, &err);
+            
+            // Fixed: used '->' because rect is a pointer
+            int centerX = rect->x + (rect->width / 2);
+            int centerY = rect->y + (rect->height / 2);
+            
+            char* name = atspi_accessible_get_name(node, &err);
+            
+            // Sanity check
+            if (centerX > 0 && centerY > 0) { 
+                if (name) {
+                    results.push_back({ string(name), centerX, centerY });
+                } else {
+                    results.push_back({ "Unknown", centerX, centerY });
+                }
+            }
+            
+            g_free(name); 
+            g_free(rect); // Free the rect structure
+        }
+    }
+
+    // Recursion: Check all children
+    int child_count = atspi_accessible_get_child_count(node, &err);
+    for (int i = 0; i < child_count; i++) {
+        AtspiAccessible* child = atspi_accessible_get_child_at_index(node, i, &err);
+        find_clickable(child, results);
+        g_object_unref(child); 
+    }
+    
+    g_object_unref(states);
+}
+
+// Low-level write to uinput
 void emit(int fd, int type, int code, int val){
-	struct input_event ie;
-	
-	memset(&ie , 0 ,sizeof(ie));
-	
-	ie.code = code;
-	ie.value = val;
-	ie.type = type;
-	
-	write(fd , &ie, sizeof(ie));
+    struct input_event ie;
+    memset(&ie, 0, sizeof(ie));
+    ie.type = type;
+    ie.code = code;
+    ie.value = val;
+    write(fd, &ie, sizeof(ie));
 }
-
-
 
 void mouseMove(int fd){
-	  float angle = 0.0f;
-	  float radios = 5.0f;
-	  int Height = 0;
-	  int Width = 0;
+      float angle = 0.0f;
+      float radius = 5.0f;
 
-	  //calcualate the difference
-	  int prevY = 0;
-	  int prevX = 0;
+      // calculate the difference
+      int prevY = 0;
+      int prevX = 0;
 
-	  cout << "Starting spiral ......"<<endl;
-	  
-	  for (int  i = 0; i < 100; i++) {
-		angle += 0.2f;
-		radius += 0.2f;
+      cout << "Starting spiral mouse movement..." << endl;
+      
+      for (int  i = 0; i < 100; i++) {
+        angle += 0.2f;
+        radius += 0.5f; // Increased speed slightly
 
-		int targetx = (int)(radius * cos(angle));
-		int targety = (int)(radius* sin(angle));
+        int targetX = (int)(radius * cos(angle));
+        int targetY = (int)(radius * sin(angle));
 
-		//calcualate DELTA (how to move from last spot)
-		int moveX = targetX - prevX;
-		int moveY = targetY - prevY;
-	 	
-		//send "Relative move"
-		emit(fd, EV_REL, REL_X, moveX);
-		emit(fd, EV_REL, REL_y, moveY);
-		emit(fd, EV_REL, SYN_REPORT,0);
+        // calculate DELTA (relative movement)
+        int moveX = targetX - prevX;
+        int moveY = targetY - prevY;
+         
+        emit(fd, EV_REL, REL_X, moveX);
+        emit(fd, EV_REL, REL_Y, moveY);
+        emit(fd, EV_SYN, SYN_REPORT, 0); // Fixed constant name
 
-	        //	
-	  }
-} 
+        // update previous position
+        prevX = targetX;
+        prevY = targetY;
+
+        usleep(20000); // Faster animation
+      }
+}
